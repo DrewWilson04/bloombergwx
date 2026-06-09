@@ -33,6 +33,8 @@ Runs in the browser (React + Vite) and ships as a native macOS app (Tauri).
 
 ## Features
 
+- **Two modes (top-right selector):** **TSTORMS** (the full severe-weather
+  dashboard below) and **HURRICANES** (a live tropical-cyclone tracker).
 - **Radar fields (pick one):**
   - **Composite Reflectivity** — animated national loop (RainViewer)
   - **Base Reflectivity** — national mosaic (Iowa Environmental Mesonet, NEXRAD N0Q)
@@ -40,6 +42,26 @@ Runs in the browser (React + Vite) and ships as a native macOS app (Tauri).
     single-site products (IEM RIDGE), auto-selected from 160 WSR-88D sites
 - **Overlays:** NWS warning polygons, isolated tornado & severe/hail warnings,
   SPC Day 1 categorical outlook, projected Bunkers storm-motion vectors
+- **7-Day Chase Outlook (computed):** a tornado-ingredient "Chase Index"
+  sampled over a CONUS grid (CAPE × deep-layer shear × low-level shear), painted
+  as hot zones with a Day 1–7 scrubber. A heuristic, **not** an official
+  forecast — confidence drops past Day 3.
+- **Hurricanes mode — a full tropical intelligence dashboard:**
+  - Live NHC storms: forecast cone, observed & forecast tracks, Saffir-Simpson
+    position points, and **34/50/64 kt wind-radii** extents
+  - **Storm stats bar:** category, position, max wind, gusts, pressure, motion,
+    advisory #, and a next-advisory countdown
+  - **NHC text products** (Public Advisory / Forecast Discussion / Tropical Wx
+    Outlook), tabbed and live
+  - **Model comparison:** GFS / ECMWF / CMC / ICON ensemble means on a 5-day
+    pressure & wind time series with a ±1σ spread band and a GFS-vs-EURO
+    divergence flag at 72 h+
+  - **Intensity environment:** deep-layer shear, SST, mid-level RH and MPI with
+    color-coded thresholds, plus a **Rapid-Intensification alert** badge
+  - **Spaghetti ensemble:** every GEFS member track (ATCF) + named guidance
+  - **Historical analogs:** top-5 IBTrACS look-alikes matched by genesis
+    location, date, and intensity — with mini track thumbnails
+  - NWS tropical watch/warning zones. Covers Atlantic + E/C Pacific automatically.
 - **Environmental analysis:** CAPE, CIN, LCL, lifted index, 0–6 km bulk shear,
   0–1 / 0–3 km SRH, STP, SCP, EHI, and the Esterheld–Giuliano critical angle —
   for your location or any point you click on the map
@@ -66,6 +88,15 @@ Everything is **free and key-less**. No accounts, no tokens, no billing.
 | Single-site velocity / SRV / echo tops | Iowa Environmental Mesonet (RIDGE) | `https://mesonet.agron.iastate.edu/data/gis/images/4326/ridge/{SITE}/{CODE}_0.png` |
 | Active warnings (polygons + list) | [NWS API](https://www.weather.gov/documentation/services-web-api) | `https://api.weather.gov/alerts/active?point=` |
 | Day 1 convective outlook | [NOAA / SPC](https://www.spc.noaa.gov) | `https://www.spc.noaa.gov/products/outlook/day1otlk_cat.nolyr.geojson` |
+| Live tropical cyclones (track, cone, points, **34/50/64 kt wind radii**) | NOAA / NHC via [Esri Living Atlas](https://www.arcgis.com/home/item.html?id=248e7b5827a34b248647afb012c58787) | `https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/Active_Hurricanes_v1/FeatureServer` |
+| NHC text products (advisory / discussion / outlook) | [NOAA / NHC](https://www.nhc.noaa.gov) | `https://www.nhc.noaa.gov/text/refresh/{PRODUCT}+shtml/` *(needs a proxy)* |
+| Ensemble model guidance (GFS/ECMWF/CMC/ICON, pressure + wind) | [Open-Meteo Ensemble](https://open-meteo.com/en/docs/ensemble-api) | `https://ensemble-api.open-meteo.com/v1/ensemble` |
+| Sea-surface temperature (intensity env) | [Open-Meteo Marine](https://open-meteo.com/en/docs/marine-weather-api) | `https://marine-api.open-meteo.com/v1/marine` |
+| Deep-layer shear / mid-level RH (200/850/500/700 hPa) | Open-Meteo | `https://api.open-meteo.com/v1/forecast` |
+| Spaghetti ensemble tracks (ATCF a-deck) | [NOAA / NHC ATCF](https://ftp.nhc.noaa.gov/atcf/) | `https://ftp.nhc.noaa.gov/atcf/aid_public/a{storm}.dat.gz` *(via companion server)* |
+| Historical analog storms | [IBTrACS v04r00](https://www.ncei.noaa.gov/products/international-best-track-archive) | `…/ibtracs.{BASIN}.list.v04r00.csv` *(via companion server)* |
+| Tropical watch/warning zones | NWS API | `https://api.weather.gov/alerts/active?event=Hurricane%20Warning,…` |
+| 7-day tornado "Chase Outlook" (computed) | Derived from Open-Meteo grid samples | *(computed in `services/chaseOutlook.js` — not a published product)* |
 | Skew-T soundings (RAOB) | [University of Wyoming](https://weather.uwyo.edu) | `https://weather.uwyo.edu/cgi-bin/sounding` *(needs a proxy — see below)* |
 
 **IEM single-site product codes:** `N0U` = base velocity, `N0S` = storm-relative
@@ -117,6 +148,8 @@ src/
     AlertTicker.jsx        # scrolling NWS warning ticker
     chrome/                # TopBar, LayerRail, Widget shell
     widgets/               # ChaseWidget, EnvAnalysisWidget
+    hurricane/             # Hurricanes mode: dashboard, map, stats bar,
+                           #   advisory text, model comparison, env params, analogs
   lib/
     severe.js              # CAPE/shear/SRH/STP/SCP/EHI/Bunkers engine
     products.js            # radar field + overlay catalog
@@ -126,12 +159,20 @@ src/
     wind.js                # u/v vector helpers
     format.js              # color/format helpers
   services/
-    api.js                 # all data fetchers + critical angle
+    api.js                 # severe-wx fetchers + critical angle
+    chaseOutlook.js        # computed 7-day tornado Chase Index (CONUS grid)
+    hurricanes.js          # NHC storms/cone/track/radii (Esri) + product IDs
+    nhcText.js             # advisory/discussion/outlook text (proxied)
+    tropicalEnv.js         # shear/SST/RH/MPI/RI + ensemble model comparison
+    tropicalServer.js      # client for the companion server (spaghetti/analogs)
     geocode.js             # place search + reverse geocode
     stations.js            # 66 RAOB sounding stations + nearestStation()
   hooks/usePolling.js      # interval-based fetch hook
+server/                    # companion Node server (ATCF spaghetti + IBTrACS analogs)
+  index.js                 # Express endpoints + parsers
 worker/
-  uwyo-proxy.js            # Cloudflare Worker that proxies the Wyoming sounding
+  uwyo-proxy.js            # single-host Cloudflare Worker (Wyoming sounding)
+  proxy.js                 # multi-host Worker (/uwyo + /nhc) for static deploys
 src-tauri/                 # native macOS app shell (Tauri 2)
 ```
 
@@ -167,6 +208,57 @@ path, `/uwyo/cgi-bin/sounding?...`, and something forwards that to Wyoming:
 
 Copy `.env.example` → `.env.production` and set the value before building if you
 go the Worker route.
+
+---
+
+## Hurricanes mode setup (mostly automatic)
+
+Most of the Hurricanes dashboard works out of the box on any static host — the
+storm map + wind radii (Esri), model comparison + intensity environment
+(Open-Meteo), and NWS alert zones are all CORS-enabled and key-less. Two pieces
+need a little help:
+
+### 1. NHC advisory text — needs a proxy (like the Skew-T)
+
+`nhc.noaa.gov` sends no CORS headers. In dev, Vite's `/nhc` proxy handles it
+automatically. In production, deploy the multi-host worker and point the app at
+it:
+
+- `worker/proxy.js` — a path-routing Cloudflare Worker (`/uwyo` **and** `/nhc`).
+  Deploy it as a plain Worker (no Git/build), then set:
+  ```
+  VITE_UWYO_PROXY=https://<worker>.workers.dev/uwyo
+  VITE_NHC_PROXY=https://<worker>.workers.dev/nhc
+  ```
+  (The older single-host `worker/uwyo-proxy.js` still works for the Skew-T; it
+  just doesn't cover advisory text.)
+
+If `VITE_NHC_PROXY` is unset in production, everything else still works — the
+advisory panel just shows a link out to nhc.noaa.gov instead of inline text.
+
+### 2. Spaghetti & Analogs — the companion server
+
+The ensemble **spaghetti tracks** (gzipped ATCF a-decks on an FTP host) and the
+**historical analogs** (a 44 MB IBTrACS CSV) can't run in a browser, so a tiny
+Node server reduces them to compact JSON:
+
+```bash
+cd server
+npm install
+npm start          # -> http://localhost:8788
+```
+
+The frontend talks to it via `VITE_TROPICAL_SERVER` (defaults to
+`http://localhost:8788` in dev). Host it anywhere (Render / Fly / a VPS) and set
+that var for production. Endpoints:
+
+- `GET /api/spaghetti/:storm` — e.g. `ep012026` → ensemble member tracks
+- `GET /api/analogs?basin=EP&lat=&lon=&month=&day=&intensity=` → top-5 analogs
+- `GET /api/nhc/<path>` — a CORS passthrough for NHC text (self-host alternative
+  to the Cloudflare Worker)
+
+Without the server, the **Spaghetti** and **Analogs** layers show a friendly
+"start the server" hint; the rest of Hurricanes mode is unaffected.
 
 ---
 
